@@ -6,10 +6,21 @@ function loadState() {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return { startDate: null, log: {} };
     const parsed = JSON.parse(raw);
-    return { startDate: parsed.startDate || null, log: parsed.log || {} };
+    const rawLog = parsed.log || {};
+    const log = {};
+    Object.keys(rawLog).forEach((dateStr) => {
+      log[dateStr] = (rawLog[dateStr] || []).map((entry) =>
+        typeof entry === "string" ? { id: entry, name: entry, custom: false } : entry
+      );
+    });
+    return { startDate: parsed.startDate || null, log };
   } catch (e) {
     return { startDate: null, log: {} };
   }
+}
+
+function escapeHtml(str) {
+  return String(str).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 
 function saveState(state) {
@@ -54,18 +65,48 @@ function daysBetween(startStr, endStr) {
 }
 
 function isLogged(dateStr, exerciseId) {
-  return (state.log[dateStr] || []).includes(exerciseId);
+  return (state.log[dateStr] || []).some((e) => e.id === exerciseId);
+}
+
+function findPlanItemById(exerciseId) {
+  for (const day of WEEK_PLAN) {
+    const found = day.items.find((it) => it.id === exerciseId);
+    if (found) return found;
+  }
+  return null;
 }
 
 function toggleExercise(dateStr, exerciseId) {
   if (!state.log[dateStr]) state.log[dateStr] = [];
-  const idx = state.log[dateStr].indexOf(exerciseId);
+  const idx = state.log[dateStr].findIndex((e) => e.id === exerciseId);
   if (idx >= 0) {
     state.log[dateStr].splice(idx, 1);
     if (state.log[dateStr].length === 0) delete state.log[dateStr];
   } else {
-    state.log[dateStr].push(exerciseId);
+    const item = findPlanItemById(exerciseId);
+    state.log[dateStr].push({ id: exerciseId, name: item ? item.name : exerciseId, custom: false });
   }
+  saveState(state);
+  renderActiveTab();
+}
+
+function addCustomLog(dateStr, name) {
+  const trimmed = (name || "").trim();
+  if (!trimmed) return;
+  if (!state.log[dateStr]) state.log[dateStr] = [];
+  state.log[dateStr].push({
+    id: "custom-" + Date.now() + "-" + Math.random().toString(36).slice(2, 7),
+    name: trimmed,
+    custom: true,
+  });
+  saveState(state);
+  renderActiveTab();
+}
+
+function removeLogEntry(dateStr, entryId) {
+  if (!state.log[dateStr]) return;
+  state.log[dateStr] = state.log[dateStr].filter((e) => e.id !== entryId);
+  if (state.log[dateStr].length === 0) delete state.log[dateStr];
   saveState(state);
   renderActiveTab();
 }
@@ -150,10 +191,12 @@ function renderDashboard() {
   const plan = dayPlanForDate(today);
   const hasStart = !!state.startDate;
   const dayNum = hasStart ? daysBetween(state.startDate, today) + 1 : null;
-  const doneCount = (state.log[today] || []).length;
+  const todayEntries = state.log[today] || [];
+  const doneCount = plan.items.filter((it) => isLogged(today, it.id)).length;
   const totalCount = plan.items.length;
   const pct = totalCount > 0 ? Math.round((doneCount / totalCount) * 100) : 100;
   const streak = computeStreak();
+  const customEntries = todayEntries.filter((e) => e.custom);
 
   main.innerHTML =
     '<section class="section">' +
@@ -192,9 +235,28 @@ function renderDashboard() {
         "</div>" +
         (totalCount > 0
           ? '<div class="progress-track"><div class="progress-fill" style="width:' + pct + '%"></div></div>' +
-            '<div class="stat-label" style="margin-bottom:14px;">' + doneCount + " of " + totalCount + " exercises done today</div>" +
+            '<div class="stat-label" style="margin-bottom:14px;">' + doneCount + " of " + totalCount + " planned today done</div>" +
             '<div class="exercise-grid">' + plan.items.map((it) => exerciseCardHtml(it, today, true)).join("") + "</div>"
           : '<div class="rest-note">Full rest day. Hydrate, sleep well, and let your muscles recover &mdash; this is part of the plan, not a break from it.</div>') +
+      "</div>" +
+
+      '<div class="card custom-log-card">' +
+        '<h3 style="font-size:15px;">Did something different? Log it</h3>' +
+        '<p class="stat-label" style="margin-bottom:12px;">Swap in whatever you actually did today &mdash; a walk, a class, anything not on the plan.</p>' +
+        '<div class="custom-log-row">' +
+          '<input type="text" id="customLogInput" placeholder="e.g. 90-minute walk" />' +
+          '<button class="btn btn-primary btn-sm" id="addCustomLogBtn">Add</button>' +
+        "</div>" +
+        (customEntries.length > 0
+          ? '<div class="custom-log-list">' +
+              customEntries
+                .map(
+                  (e) =>
+                    '<div class="custom-log-item"><span>' + escapeHtml(e.name) + '</span><button class="remove-log-btn" data-date="' + today + '" data-id="' + e.id + '" aria-label="Remove">&times;</button></div>'
+                )
+                .join("") +
+            "</div>"
+          : "") +
       "</div>" +
     "</section>";
 
@@ -237,6 +299,23 @@ function wireDashboardEvents() {
       toggleExercise(btn.dataset.date, btn.dataset.exercise);
     });
   });
+
+  const addLogBtn = document.getElementById("addCustomLogBtn");
+  const logInput = document.getElementById("customLogInput");
+  if (addLogBtn && logInput) {
+    const submit = () => {
+      addCustomLog(todayStr(), logInput.value);
+    };
+    addLogBtn.addEventListener("click", submit);
+    logInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") submit();
+    });
+  }
+  main.querySelectorAll(".remove-log-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      removeLogEntry(btn.dataset.date, btn.dataset.id);
+    });
+  });
 }
 
 function renderWeek() {
@@ -244,8 +323,8 @@ function renderWeek() {
   main.innerHTML =
     '<section class="section">' +
       '<div class="section-head">' +
-        "<h2>Your 2-Gym / 2-Home Weekly Plan</h2>" +
-        "<p>Built around your 5kg dumbbells, resistance bands, and bench at home, plus full equipment on your two gym days. Tap a video link to check your form.</p>" +
+        "<h2>Your Weekly Plan</h2>" +
+        "<p>Two gym strength days, one home strength day, a Friday walk, plus recovery and light cardio. Tap a video link to check your form.</p>" +
       "</div>" +
       '<div class="week-grid">' +
         WEEK_PLAN.map((day) => {
@@ -350,7 +429,7 @@ function renderProgress() {
               logEntries
                 .map(
                   (dStr) =>
-                    '<div class="log-row"><span class="log-date">' + formatPretty(dStr) + "</span><span class=\"log-count\">" + state.log[dStr].length + " exercise(s) completed</span></div>"
+                    '<div class="log-row"><span class="log-date">' + formatPretty(dStr) + "</span><span class=\"log-count\">" + state.log[dStr].map((e) => escapeHtml(e.name)).join(", ") + "</span></div>"
                 )
                 .join("") +
             "</div>"

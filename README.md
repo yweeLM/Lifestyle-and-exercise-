@@ -1,9 +1,10 @@
 # Her Strength Plan
 
-A personal health and fitness site built around a 2-gym / 2-home strength
-training week, a hormone-smart nutrition plan, and a progress tracker —
-tailored for a 48-year-old woman with 5kg dumbbells, resistance bands, and a
-bench at home, plus full gym access twice a week.
+A personal health and fitness site built around a weekly strength and
+walking schedule (two gym days, one home strength day, a Friday walk, plus
+recovery and light cardio), a hormone-smart nutrition plan, and a progress
+tracker — tailored for a 48-year-old woman with 5kg dumbbells, resistance
+bands, and a bench at home, plus full gym access twice a week.
 
 It's a static site (plain HTML/CSS/JS, no build step, no backend), so it
 deploys in minutes on either GitHub Pages or Vercel.
