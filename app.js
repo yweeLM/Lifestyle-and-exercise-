@@ -324,7 +324,7 @@ function renderWeek() {
     '<section class="section">' +
       '<div class="section-head">' +
         "<h2>Your Weekly Plan</h2>" +
-        "<p>Two gym strength days, one home strength day, a Friday walk, plus recovery and light cardio. Tap a video link to check your form.</p>" +
+        "<p>Two gym strength days, one home strength day, a Wednesday walk, plus active recovery and light cardio. Tap a video link to check your form.</p>" +
       "</div>" +
       '<div class="week-grid">' +
         WEEK_PLAN.map((day) => {
