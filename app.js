@@ -1,10 +1,12 @@
-// State: { startDate: "YYYY-MM-DD" | null, log: { "YYYY-MM-DD": [exerciseId, ...] } }
+// State: { startDate: "YYYY-MM-DD" | null,
+//          log: { "YYYY-MM-DD": [exerciseId, ...] },
+//          nutrition: { "YYYY-MM-DD": { protein: bool, carbs: bool, fats: bool, water: bool } } }
 const STORAGE_KEY = "fitnessPlan_v1";
 
 function loadState() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return { startDate: null, log: {} };
+    if (!raw) return { startDate: null, log: {}, nutrition: {} };
     const parsed = JSON.parse(raw);
     const rawLog = parsed.log || {};
     const log = {};
@@ -13,9 +15,9 @@ function loadState() {
         typeof entry === "string" ? { id: entry, name: entry, custom: false } : entry
       );
     });
-    return { startDate: parsed.startDate || null, log };
+    return { startDate: parsed.startDate || null, log, nutrition: parsed.nutrition || {} };
   } catch (e) {
-    return { startDate: null, log: {} };
+    return { startDate: null, log: {}, nutrition: {} };
   }
 }
 
@@ -111,6 +113,24 @@ function removeLogEntry(dateStr, entryId) {
   renderActiveTab();
 }
 
+function isNutritionChecked(dateStr, key) {
+  return !!(state.nutrition[dateStr] && state.nutrition[dateStr][key]);
+}
+
+function toggleNutrition(dateStr, key) {
+  if (!state.nutrition[dateStr]) state.nutrition[dateStr] = {};
+  state.nutrition[dateStr][key] = !state.nutrition[dateStr][key];
+  if (!Object.values(state.nutrition[dateStr]).some(Boolean)) delete state.nutrition[dateStr];
+  saveState(state);
+  renderActiveTab();
+}
+
+function nutritionCheckedCount(dateStr) {
+  const entry = state.nutrition[dateStr];
+  if (!entry) return 0;
+  return Object.values(entry).filter(Boolean).length;
+}
+
 function computeStreak() {
   let streak = 0;
   let cursor = new Date();
@@ -178,6 +198,20 @@ function exerciseCardHtml(item, dateStr, interactive) {
   );
 }
 
+function nutritionRowHtml(pillar, dateStr) {
+  const checked = isNutritionChecked(dateStr, pillar.icon);
+  return (
+    '<div class="nutrition-row ' + (checked ? "done" : "") + '">' +
+      '<div class="nutrition-row-icon">' + demoIconMarkup(pillar.icon) + "</div>" +
+      '<div class="nutrition-row-body">' +
+        '<div class="nutrition-row-title">' + pillar.title + "</div>" +
+        '<div class="nutrition-row-detail">' + pillar.detail + "</div>" +
+      "</div>" +
+      '<button class="check-toggle ' + (checked ? "checked" : "") + '" data-nutrition="' + pillar.icon + '" data-date="' + dateStr + '" aria-label="Mark done">' + (checked ? "&#10003;" : "") + "</button>" +
+    "</div>"
+  );
+}
+
 function pillClass(theme) {
   if (theme === "gym") return "pill-gym";
   if (theme === "home") return "pill-home";
@@ -197,6 +231,9 @@ function renderDashboard() {
   const pct = totalCount > 0 ? Math.round((doneCount / totalCount) * 100) : 100;
   const streak = computeStreak();
   const customEntries = todayEntries.filter((e) => e.custom);
+  const nutritionDone = nutritionCheckedCount(today);
+  const nutritionTotal = NUTRITION_PILLARS.length;
+  const nutritionPct = Math.round((nutritionDone / nutritionTotal) * 100);
 
   main.innerHTML =
     '<section class="section">' +
@@ -238,6 +275,18 @@ function renderDashboard() {
             '<div class="stat-label" style="margin-bottom:14px;">' + doneCount + " of " + totalCount + " planned today done</div>" +
             '<div class="exercise-grid">' + plan.items.map((it) => exerciseCardHtml(it, today, true)).join("") + "</div>"
           : '<div class="rest-note">Full rest day. Hydrate, sleep well, and let your muscles recover &mdash; this is part of the plan, not a break from it.</div>') +
+      "</div>" +
+
+      '<div class="card nutrition-card">' +
+        '<div class="today-head">' +
+          '<h2 style="font-size:18px;">Today\'s Nutrition</h2>' +
+          '<div class="stat-label">' + nutritionDone + " of " + nutritionTotal + " goals hit</div>" +
+        "</div>" +
+        '<div class="progress-track"><div class="progress-fill" style="width:' + nutritionPct + '%"></div></div>' +
+        '<div class="stat-label" style="margin-bottom:14px;">Check off each one as you hit it today.</div>' +
+        '<div class="nutrition-check-list">' +
+          NUTRITION_PILLARS.map((p) => nutritionRowHtml(p, today)).join("") +
+        "</div>" +
       "</div>" +
 
       '<div class="card custom-log-card">' +
@@ -287,16 +336,21 @@ function wireDashboardEvents() {
   const resetBtn = document.getElementById("resetBtn");
   if (resetBtn) {
     resetBtn.addEventListener("click", () => {
-      if (confirm("This clears your start date and all logged workouts. Continue?")) {
-        state = { startDate: null, log: {} };
+      if (confirm("This clears your start date and all logged workouts and nutrition. Continue?")) {
+        state = { startDate: null, log: {}, nutrition: {} };
         saveState(state);
         renderDashboard();
       }
     });
   }
-  main.querySelectorAll(".check-toggle").forEach((btn) => {
+  main.querySelectorAll(".check-toggle[data-exercise]").forEach((btn) => {
     btn.addEventListener("click", () => {
       toggleExercise(btn.dataset.date, btn.dataset.exercise);
+    });
+  });
+  main.querySelectorAll(".check-toggle[data-nutrition]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      toggleNutrition(btn.dataset.date, btn.dataset.nutrition);
     });
   });
 
@@ -402,13 +456,16 @@ function renderProgress() {
   for (let i = 0; i < startOffset; i++) cells += '<div class="cal-cell empty"></div>';
   for (let d = 1; d <= daysInMonth; d++) {
     const dStr = dateToStr(new Date(year, month, d));
-    const hasLog = (state.log[dStr] || []).length > 0;
+    const hasLog = (state.log[dStr] || []).length > 0 || nutritionCheckedCount(dStr) > 0;
     const isToday = dStr === todayString;
     cells += '<div class="cal-cell ' + (hasLog ? "has-log" : "") + " " + (isToday ? "today" : "") + '">' + d + "</div>";
   }
 
-  const logEntries = Object.keys(state.log)
-    .filter((k) => state.log[k].length > 0)
+  const activeDates = new Set([
+    ...Object.keys(state.log).filter((k) => state.log[k].length > 0),
+    ...Object.keys(state.nutrition).filter((k) => nutritionCheckedCount(k) > 0),
+  ]);
+  const logEntries = Array.from(activeDates)
     .sort((a, b) => (a < b ? 1 : -1))
     .slice(0, 30);
 
@@ -427,13 +484,16 @@ function renderProgress() {
         (logEntries.length > 0
           ? '<div class="log-list">' +
               logEntries
-                .map(
-                  (dStr) =>
-                    '<div class="log-row"><span class="log-date">' + formatPretty(dStr) + "</span><span class=\"log-count\">" + state.log[dStr].map((e) => escapeHtml(e.name)).join(", ") + "</span></div>"
-                )
+                .map((dStr) => {
+                  const exerciseNames = (state.log[dStr] || []).map((e) => escapeHtml(e.name));
+                  const nutriCount = nutritionCheckedCount(dStr);
+                  const summary = exerciseNames.slice();
+                  if (nutriCount > 0) summary.push("Nutrition " + nutriCount + "/" + NUTRITION_PILLARS.length);
+                  return '<div class="log-row"><span class="log-date">' + formatPretty(dStr) + "</span><span class=\"log-count\">" + summary.join(", ") + "</span></div>";
+                })
                 .join("") +
             "</div>"
-          : '<div class="empty-state">No workouts logged yet. Check off exercises on the Today tab as you complete them.</div>') +
+          : '<div class="empty-state">No workouts or nutrition logged yet. Check things off on the Today tab as you complete them.</div>') +
       "</div>" +
     "</section>";
 }
